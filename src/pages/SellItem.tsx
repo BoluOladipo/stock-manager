@@ -206,7 +206,8 @@ const SellItem: React.FC = () => {
       // Create receipt
       const receipt = await receiptsDB.add({
         saleId: sale.id,
-        businessName: settings?.businessName || 'Keke Spare Parts',
+        businessName: settings?.businessName || 'Nigro Automobiles',
+        businessAddress: settings?.businessAddress || '56 Iwofe Road, Rumuopirikom, PHC',
         items: saleItems,
         totalAmount,
         sellerName: sellerName.trim(),
