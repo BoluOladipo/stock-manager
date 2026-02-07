@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { settingsDB, AppSettings } from '@/lib/database';
+import { settingsDB, hashPin, AppSettings } from '@/lib/database';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -34,7 +34,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       let currentSettings = await settingsDB.get();
       if (!currentSettings) {
+        // No settings at all - initialize with defaults including default PIN
         currentSettings = await settingsDB.initialize();
+      } else if (!currentSettings.pinHash) {
+        // Settings exist but no PIN - set the default PIN
+        await settingsDB.setPin('159874');
+        currentSettings = await settingsDB.get();
+        if (!currentSettings) {
+          currentSettings = await settingsDB.initialize();
+        }
       }
       setSettings(currentSettings);
       setIsPinSetup(!!currentSettings.pinHash);
