@@ -1,5 +1,5 @@
-// Database schema and utilities for offline-first storage
-import { openDB, DBSchema, IDBPDatabase } from 'idb';
+// Database layer backed by Supabase (Lovable Cloud) for cross-device access
+import { supabase } from '@/integrations/supabase/client';
 
 export interface InventoryItem {
   id: string;
@@ -50,73 +50,12 @@ export interface AppSettings {
   updatedAt: string;
 }
 
-interface KekeDB extends DBSchema {
-  inventory: {
-    key: string;
-    value: InventoryItem;
-    indexes: { 'by-name': string; 'by-category': string };
-  };
-  sales: {
-    key: string;
-    value: Sale;
-    indexes: { 'by-date': string };
-  };
-  receipts: {
-    key: string;
-    value: Receipt;
-    indexes: { 'by-sale': string; 'by-date': string };
-  };
-  settings: {
-    key: string;
-    value: AppSettings;
-  };
-}
-
-const DB_NAME = 'keke-inventory-db';
-const DB_VERSION = 1;
-
-let dbPromise: Promise<IDBPDatabase<KekeDB>> | null = null;
-
-export const getDB = async (): Promise<IDBPDatabase<KekeDB>> => {
-  if (!dbPromise) {
-    dbPromise = openDB<KekeDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        // Inventory store
-        if (!db.objectStoreNames.contains('inventory')) {
-          const inventoryStore = db.createObjectStore('inventory', { keyPath: 'id' });
-          inventoryStore.createIndex('by-name', 'name');
-          inventoryStore.createIndex('by-category', 'category');
-        }
-
-        // Sales store
-        if (!db.objectStoreNames.contains('sales')) {
-          const salesStore = db.createObjectStore('sales', { keyPath: 'id' });
-          salesStore.createIndex('by-date', 'createdAt');
-        }
-
-        // Receipts store
-        if (!db.objectStoreNames.contains('receipts')) {
-          const receiptsStore = db.createObjectStore('receipts', { keyPath: 'id' });
-          receiptsStore.createIndex('by-sale', 'saleId');
-          receiptsStore.createIndex('by-date', 'createdAt');
-        }
-
-        // Settings store
-        if (!db.objectStoreNames.contains('settings')) {
-          db.createObjectStore('settings', { keyPath: 'id' });
-        }
-      },
-    });
-  }
-  return dbPromise;
-};
-
 // Generate unique ID
 export const generateId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
-// Simple hash function for PIN (not cryptographically secure, but works offline)
+// Simple hash function for PIN
 export const hashPin = async (pin: string): Promise<string> => {
   const encoder = new TextEncoder();
   const data = encoder.encode(pin + 'keke-salt-2024');
@@ -125,49 +64,117 @@ export const hashPin = async (pin: string): Promise<string> => {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
+// Helper to map DB row to InventoryItem
+const mapInventoryRow = (row: any): InventoryItem => ({
+  id: row.id,
+  name: row.name,
+  category: row.category,
+  unitPrice: Number(row.unit_price),
+  quantity: row.quantity,
+  lowStockThreshold: row.low_stock_threshold,
+  dateAdded: row.date_added,
+  updatedAt: row.updated_at,
+});
+
+// Helper to map DB row to AppSettings
+const mapSettingsRow = (row: any): AppSettings => ({
+  id: row.id,
+  pinHash: row.pin_hash,
+  businessName: row.business_name,
+  businessAddress: row.business_address,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+// Helper to map DB row to Sale
+const mapSaleRow = (row: any): Sale => ({
+  id: row.id,
+  items: (row.items as SaleItem[]) || [],
+  totalAmount: Number(row.total_amount),
+  sellerName: row.seller_name,
+  buyerName: row.buyer_name,
+  createdAt: row.created_at,
+});
+
+// Helper to map DB row to Receipt
+const mapReceiptRow = (row: any): Receipt => ({
+  id: row.id,
+  saleId: row.sale_id,
+  businessName: row.business_name,
+  businessAddress: row.business_address,
+  items: (row.items as SaleItem[]) || [],
+  totalAmount: Number(row.total_amount),
+  sellerName: row.seller_name,
+  buyerName: row.buyer_name,
+  createdAt: row.created_at,
+});
+
 // Inventory operations
 export const inventoryDB = {
   async getAll(): Promise<InventoryItem[]> {
-    const db = await getDB();
-    return db.getAll('inventory');
+    const { data, error } = await supabase
+      .from('inventory')
+      .select('*')
+      .order('date_added', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapInventoryRow);
   },
 
   async getById(id: string): Promise<InventoryItem | undefined> {
-    const db = await getDB();
-    return db.get('inventory', id);
+    const { data, error } = await supabase
+      .from('inventory')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapInventoryRow(data) : undefined;
   },
 
   async add(item: Omit<InventoryItem, 'id' | 'dateAdded' | 'updatedAt'>): Promise<InventoryItem> {
-    const db = await getDB();
+    const id = generateId();
     const now = new Date().toISOString();
-    const newItem: InventoryItem = {
-      ...item,
-      id: generateId(),
-      dateAdded: now,
-      updatedAt: now,
-    };
-    await db.add('inventory', newItem);
-    return newItem;
+    const { data, error } = await supabase
+      .from('inventory')
+      .insert({
+        id,
+        name: item.name,
+        category: item.category,
+        unit_price: item.unitPrice,
+        quantity: item.quantity,
+        low_stock_threshold: item.lowStockThreshold,
+        date_added: now,
+        updated_at: now,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return mapInventoryRow(data);
   },
 
   async update(id: string, updates: Partial<InventoryItem>): Promise<InventoryItem | undefined> {
-    const db = await getDB();
-    const item = await db.get('inventory', id);
-    if (!item) return undefined;
-    
-    const updatedItem: InventoryItem = {
-      ...item,
-      ...updates,
-      id,
-      updatedAt: new Date().toISOString(),
-    };
-    await db.put('inventory', updatedItem);
-    return updatedItem;
+    const updateData: any = {};
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.category !== undefined) updateData.category = updates.category;
+    if (updates.unitPrice !== undefined) updateData.unit_price = updates.unitPrice;
+    if (updates.quantity !== undefined) updateData.quantity = updates.quantity;
+    if (updates.lowStockThreshold !== undefined) updateData.low_stock_threshold = updates.lowStockThreshold;
+
+    const { data, error } = await supabase
+      .from('inventory')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data ? mapInventoryRow(data) : undefined;
   },
 
   async delete(id: string): Promise<void> {
-    const db = await getDB();
-    await db.delete('inventory', id);
+    const { error } = await supabase
+      .from('inventory')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
   },
 
   async getLowStock(): Promise<InventoryItem[]> {
@@ -176,121 +183,150 @@ export const inventoryDB = {
   },
 
   async deductStock(itemId: string, quantity: number): Promise<InventoryItem | undefined> {
-    const db = await getDB();
-    const item = await db.get('inventory', itemId);
+    // First get current item
+    const item = await this.getById(itemId);
     if (!item || item.quantity < quantity) return undefined;
-    
-    const updatedItem: InventoryItem = {
-      ...item,
-      quantity: item.quantity - quantity,
-      updatedAt: new Date().toISOString(),
-    };
-    await db.put('inventory', updatedItem);
-    return updatedItem;
+
+    const { data, error } = await supabase
+      .from('inventory')
+      .update({ quantity: item.quantity - quantity })
+      .eq('id', itemId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data ? mapInventoryRow(data) : undefined;
   },
 };
 
 // Sales operations
 export const salesDB = {
   async getAll(): Promise<Sale[]> {
-    const db = await getDB();
-    const sales = await db.getAll('sales');
-    return sales.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const { data, error } = await supabase
+      .from('sales')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapSaleRow);
   },
 
   async getById(id: string): Promise<Sale | undefined> {
-    const db = await getDB();
-    return db.get('sales', id);
+    const { data, error } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapSaleRow(data) : undefined;
   },
 
   async add(sale: Omit<Sale, 'id' | 'createdAt'>): Promise<Sale> {
-    const db = await getDB();
-    const newSale: Sale = {
-      ...sale,
-      id: generateId(),
-      createdAt: new Date().toISOString(),
-    };
-    await db.add('sales', newSale);
-    return newSale;
+    const id = generateId();
+    const { data, error } = await supabase
+      .from('sales')
+      .insert({
+        id,
+        items: sale.items as any,
+        total_amount: sale.totalAmount,
+        seller_name: sale.sellerName,
+        buyer_name: sale.buyerName,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return mapSaleRow(data);
   },
 };
 
 // Receipts operations
 export const receiptsDB = {
   async getAll(): Promise<Receipt[]> {
-    const db = await getDB();
-    const receipts = await db.getAll('receipts');
-    return receipts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const { data, error } = await supabase
+      .from('receipts')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapReceiptRow);
   },
 
   async getById(id: string): Promise<Receipt | undefined> {
-    const db = await getDB();
-    return db.get('receipts', id);
+    const { data, error } = await supabase
+      .from('receipts')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapReceiptRow(data) : undefined;
   },
 
   async getBySaleId(saleId: string): Promise<Receipt | undefined> {
-    const db = await getDB();
-    const receipts = await db.getAllFromIndex('receipts', 'by-sale', saleId);
-    return receipts[0];
+    const { data, error } = await supabase
+      .from('receipts')
+      .select('*')
+      .eq('sale_id', saleId)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapReceiptRow(data) : undefined;
   },
 
   async add(receipt: Omit<Receipt, 'id' | 'createdAt'>): Promise<Receipt> {
-    const db = await getDB();
-    const newReceipt: Receipt = {
-      ...receipt,
-      id: generateId(),
-      createdAt: new Date().toISOString(),
-    };
-    await db.add('receipts', newReceipt);
-    return newReceipt;
+    const id = generateId();
+    const { data, error } = await supabase
+      .from('receipts')
+      .insert({
+        id,
+        sale_id: receipt.saleId,
+        business_name: receipt.businessName,
+        business_address: receipt.businessAddress,
+        items: receipt.items as any,
+        total_amount: receipt.totalAmount,
+        seller_name: receipt.sellerName,
+        buyer_name: receipt.buyerName,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return mapReceiptRow(data);
   },
 };
 
 // Settings operations
 export const settingsDB = {
   async get(): Promise<AppSettings | undefined> {
-    const db = await getDB();
-    return db.get('settings', 'main');
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('*')
+      .eq('id', 'main')
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapSettingsRow(data) : undefined;
   },
 
-  async initialize(businessName: string = 'Nigro Automobiles', businessAddress: string = '56 Iwofe Road, Rumuopirikom, PHC'): Promise<AppSettings> {
-    const db = await getDB();
-    const now = new Date().toISOString();
+  async initialize(
+    businessName: string = 'Nigro Automobiles',
+    businessAddress: string = '56 Iwofe Road, Rumuopirikom, PHC'
+  ): Promise<AppSettings> {
     const defaultPinHash = await hashPin('159874');
-    const settings: AppSettings = {
-      id: 'main',
-      pinHash: defaultPinHash,
-      businessName,
-      businessAddress,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await db.put('settings', settings);
-    return settings;
+    const { data, error } = await supabase
+      .from('app_settings')
+      .upsert({
+        id: 'main',
+        pin_hash: defaultPinHash,
+        business_name: businessName,
+        business_address: businessAddress,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return mapSettingsRow(data);
   },
 
   async setPin(pin: string): Promise<void> {
-    const db = await getDB();
-    const settings = await this.get();
     const pinHash = await hashPin(pin);
-    
-    if (settings) {
-      await db.put('settings', {
-        ...settings,
-        pinHash,
-        updatedAt: new Date().toISOString(),
-      });
-    } else {
-      await this.initialize();
-      const newSettings = await this.get();
-      if (newSettings) {
-        await db.put('settings', {
-          ...newSettings,
-          pinHash,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-    }
+    const { error } = await supabase
+      .from('app_settings')
+      .update({ pin_hash: pinHash })
+      .eq('id', 'main');
+    if (error) throw error;
   },
 
   async verifyPin(pin: string): Promise<boolean> {
@@ -301,39 +337,26 @@ export const settingsDB = {
   },
 
   async updateBusinessName(name: string): Promise<void> {
-    const db = await getDB();
-    const settings = await this.get();
-    if (settings) {
-      await db.put('settings', {
-        ...settings,
-        businessName: name,
-        updatedAt: new Date().toISOString(),
-      });
-    }
+    const { error } = await supabase
+      .from('app_settings')
+      .update({ business_name: name })
+      .eq('id', 'main');
+    if (error) throw error;
   },
 
   async updateBusinessAddress(address: string): Promise<void> {
-    const db = await getDB();
-    const settings = await this.get();
-    if (settings) {
-      await db.put('settings', {
-        ...settings,
-        businessAddress: address,
-        updatedAt: new Date().toISOString(),
-      });
-    }
+    const { error } = await supabase
+      .from('app_settings')
+      .update({ business_address: address })
+      .eq('id', 'main');
+    if (error) throw error;
   },
 
   async updateBusinessInfo(name: string, address: string): Promise<void> {
-    const db = await getDB();
-    const settings = await this.get();
-    if (settings) {
-      await db.put('settings', {
-        ...settings,
-        businessName: name,
-        businessAddress: address,
-        updatedAt: new Date().toISOString(),
-      });
-    }
+    const { error } = await supabase
+      .from('app_settings')
+      .update({ business_name: name, business_address: address })
+      .eq('id', 'main');
+    if (error) throw error;
   },
 };
