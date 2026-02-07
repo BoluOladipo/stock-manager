@@ -63,7 +63,7 @@ const Dashboard: React.FC = () => {
   };
 
   return (
-    <PageLayout title={settings?.businessName || 'Keke Inventory'}>
+    <PageLayout title={settings?.businessName || 'Nigro Automobiles'}>
       <motion.div
         variants={containerVariants}
         initial="hidden"

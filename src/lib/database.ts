@@ -33,6 +33,7 @@ export interface Receipt {
   id: string;
   saleId: string;
   businessName: string;
+  businessAddress: string;
   items: SaleItem[];
   totalAmount: number;
   sellerName: string;
@@ -44,6 +45,7 @@ export interface AppSettings {
   id: string;
   pinHash: string | null;
   businessName: string;
+  businessAddress: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -251,13 +253,15 @@ export const settingsDB = {
     return db.get('settings', 'main');
   },
 
-  async initialize(businessName: string = 'Keke Spare Parts'): Promise<AppSettings> {
+  async initialize(businessName: string = 'Nigro Automobiles', businessAddress: string = '56 Iwofe Road, Rumuopirikom, PHC'): Promise<AppSettings> {
     const db = await getDB();
     const now = new Date().toISOString();
+    const defaultPinHash = await hashPin('159874');
     const settings: AppSettings = {
       id: 'main',
-      pinHash: null,
+      pinHash: defaultPinHash,
       businessName,
+      businessAddress,
       createdAt: now,
       updatedAt: now,
     };
@@ -303,6 +307,31 @@ export const settingsDB = {
       await db.put('settings', {
         ...settings,
         businessName: name,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  },
+
+  async updateBusinessAddress(address: string): Promise<void> {
+    const db = await getDB();
+    const settings = await this.get();
+    if (settings) {
+      await db.put('settings', {
+        ...settings,
+        businessAddress: address,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  },
+
+  async updateBusinessInfo(name: string, address: string): Promise<void> {
+    const db = await getDB();
+    const settings = await this.get();
+    if (settings) {
+      await db.put('settings', {
+        ...settings,
+        businessName: name,
+        businessAddress: address,
         updatedAt: new Date().toISOString(),
       });
     }

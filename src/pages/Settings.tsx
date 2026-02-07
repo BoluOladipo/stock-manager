@@ -34,7 +34,8 @@ const Settings: React.FC = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   
-  const [businessName, setBusinessName] = useState(settings?.businessName || '');
+  const [businessName, setBusinessName] = useState(settings?.businessName || 'Nigro Automobiles');
+  const [businessAddress, setBusinessAddress] = useState(settings?.businessAddress || '56 Iwofe Road, Rumuopirikom, PHC');
   const [isSaving, setIsSaving] = useState(false);
   
   const [showPinDialog, setShowPinDialog] = useState(false);
@@ -75,7 +76,7 @@ const Settings: React.FC = () => {
     setShowInstallButton(false);
   };
 
-  const handleSaveBusinessName = async () => {
+  const handleSaveBusinessInfo = async () => {
     if (!businessName.trim()) {
       toast({
         title: 'Error',
@@ -88,11 +89,11 @@ const Settings: React.FC = () => {
     setIsSaving(true);
     
     try {
-      await settingsDB.updateBusinessName(businessName.trim());
+      await settingsDB.updateBusinessInfo(businessName.trim(), businessAddress.trim());
       await refreshSettings();
       toast({
         title: 'Saved',
-        description: 'Business name updated successfully',
+        description: 'Business details updated successfully',
       });
     } catch (error) {
       toast({
@@ -211,8 +212,17 @@ const Settings: React.FC = () => {
                 placeholder="Enter business name"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="businessAddress">Business Address</Label>
+              <Input
+                id="businessAddress"
+                value={businessAddress}
+                onChange={(e) => setBusinessAddress(e.target.value)}
+                placeholder="Enter business address"
+              />
+            </div>
             <Button 
-              onClick={handleSaveBusinessName} 
+              onClick={handleSaveBusinessInfo} 
               disabled={isSaving}
               className="w-full btn-touch"
             >
@@ -271,7 +281,7 @@ const Settings: React.FC = () => {
 
         {/* App Info */}
         <div className="text-center text-sm text-muted-foreground pt-4">
-          <p>Keke Inventory & Sales v1.0</p>
+          <p>Nigro Automobiles - Inventory & Sales v1.0</p>
           <p>Works offline • Data stored locally</p>
         </div>
       </motion.div>

@@ -9,7 +9,7 @@ import {
   Download,
   Receipt as ReceiptIcon
 } from 'lucide-react';
-import { receiptsDB, Receipt as ReceiptType } from '@/lib/database';
+import { receiptsDB, Receipt as ReceiptType, settingsDB } from '@/lib/database';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -41,6 +41,7 @@ const ReceiptDetail: React.FC = () => {
 
     const receiptText = `
 ${receipt.businessName}
+${receipt.businessAddress || ''}
 Receipt #${receipt.id.slice(0, 8).toUpperCase()}
 Date: ${format(new Date(receipt.createdAt), 'PPp')}
 
@@ -142,6 +143,11 @@ Thank you for your business!
                 <h2 className="text-xl font-bold text-foreground">
                   {receipt.businessName}
                 </h2>
+                {receipt.businessAddress && (
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    {receipt.businessAddress}
+                  </p>
+                )}
                 <p className="text-sm text-muted-foreground mt-1">
                   Receipt #{receipt.id.slice(0, 8).toUpperCase()}
                 </p>
